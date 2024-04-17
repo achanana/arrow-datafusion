@@ -19,6 +19,7 @@
 
 pub use cross_join::CrossJoinExec;
 pub use hash_build::HashBuildExec;
+pub use hash_build::HashBuildResult;
 pub use hash_join::HashJoinExec;
 pub use hash_probe::HashProbeExec;
 pub use nested_loop_join::NestedLoopJoinExec;
