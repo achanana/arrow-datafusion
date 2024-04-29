@@ -127,11 +127,11 @@ pub struct JoinHashMap {
 
 impl JoinHashMap {
     #[cfg(test)]
-    pub(crate) fn new(map: RawTable<(u64, u64)>, next: Vec<u64>) -> Self {
+    pub fn new(map: RawTable<(u64, u64)>, next: Vec<u64>) -> Self {
         Self { map, next }
     }
 
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(capacity: usize) -> Self {
         JoinHashMap {
             map: RawTable::with_capacity(capacity),
             next: vec![0; capacity],
