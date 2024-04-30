@@ -58,6 +58,7 @@ parking_lot = { workspace = true }
 pin-project-lite = "^0.2.7"
 rand = { workspace = true }
 tokio = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 rstest = { workspace = true }

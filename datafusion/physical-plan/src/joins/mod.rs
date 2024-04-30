@@ -20,10 +20,11 @@
 pub use cross_join::CrossJoinExec;
 pub use hash_build::HashBuildExec;
 pub use hash_build::HashBuildResult;
+pub use hash_join::update_hash;
 pub use hash_join::HashJoinExec;
 pub use hash_probe::HashProbeExec;
+pub use hash_probe::JoinLeftData;
 pub use nested_loop_join::NestedLoopJoinExec;
-pub use hash_join::update_hash;
 // Note: SortMergeJoin is not used in plans yet
 pub use sort_merge_join::SortMergeJoinExec;
 pub use symmetric_hash_join::SymmetricHashJoinExec;

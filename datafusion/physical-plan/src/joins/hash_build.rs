@@ -31,20 +31,17 @@ use crate::ExecutionPlanProperties;
 use crate::{
     coalesce_partitions::CoalescePartitionsExec,
     common::can_project,
-    execution_mode_from_children, handle_state,
+    handle_state,
     hash_utils::create_hashes,
     joins::utils::{
-        adjust_indices_by_join_type, adjust_right_output_partitioning,
-        apply_join_filter_to_indices, build_batch_from_indices, build_join_schema,
-        check_join_is_valid, estimate_join_statistics, get_final_indices_from_bit_map,
-        need_produce_result_in_final, partitioned_join_output_partitioning,
-        BuildProbeJoinMetrics, ColumnIndex, JoinFilter, JoinHashMap, JoinHashMapOffset,
-        JoinHashMapType, JoinOn, JoinOnRef, StatefulStreamResult,
+        adjust_indices_by_join_type, apply_join_filter_to_indices,
+        build_batch_from_indices, get_final_indices_from_bit_map,
+        need_produce_result_in_final, BuildProbeJoinMetrics, ColumnIndex, JoinFilter,
+        JoinHashMap, JoinHashMapOffset, JoinHashMapType, StatefulStreamResult,
     },
     metrics::{ExecutionPlanMetricsSet, MetricsSet},
-    DisplayAs, DisplayFormatType, Distribution, ExecutionMode, ExecutionPlan,
-    Partitioning, PlanProperties, RecordBatchStream, SendableRecordBatchStream,
-    Statistics,
+    DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, RecordBatchStream,
+    SendableRecordBatchStream,
 };
 
 use arrow::array::{
@@ -59,15 +56,11 @@ use arrow::util::bit_util;
 use arrow_array::cast::downcast_array;
 use arrow_schema::ArrowError;
 use datafusion_common::{
-    internal_datafusion_err, internal_err, plan_err, project_schema, DataFusionError,
-    JoinSide, JoinType, Result,
+    internal_datafusion_err, internal_err, plan_err, DataFusionError, JoinSide, JoinType,
+    Result,
 };
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
 use datafusion_execution::TaskContext;
-use datafusion_physical_expr::equivalence::{
-    join_equivalence_properties, ProjectionMapping,
-};
-use datafusion_physical_expr::expressions::UnKnownColumn;
 use datafusion_physical_expr::{PhysicalExpr, PhysicalExprRef};
 
 use ahash::RandomState;

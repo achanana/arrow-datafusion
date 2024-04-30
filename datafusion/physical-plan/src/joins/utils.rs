@@ -55,6 +55,7 @@ use futures::future::{BoxFuture, Shared};
 use futures::{ready, FutureExt};
 use hashbrown::raw::RawTable;
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
 
 /// Maps a `u64` hash value based on the build side ["on" values] to a list of indices with this key's value.
 ///
@@ -118,6 +119,7 @@ use parking_lot::Mutex;
 /// | 0 | 0 | 0 | 2 | 4 | <--- hash value 10 maps to 5,4,2 (which means indices values 4,3,1)
 /// ---------------------
 /// ```
+#[derive(Clone)]
 pub struct JoinHashMap {
     // Stores hash value to last row index
     map: RawTable<(u64, u64)>,

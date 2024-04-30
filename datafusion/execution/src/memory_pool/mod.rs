@@ -180,7 +180,7 @@ impl Drop for SharedRegistration {
 /// to the pool on drop.
 ///
 /// The reservation can be grown or shrunk over time.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MemoryReservation {
     registration: Arc<SharedRegistration>,
     size: usize,
