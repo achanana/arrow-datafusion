@@ -305,9 +305,10 @@ pub struct HashProbeExec {
     /// matched and thus will not appear in the output.
     pub null_equals_null: bool,
     /// Cache holding plan properties like equivalences, output partitioning etc.
-    // cache: PlanProperties,
+    cache: PlanProperties,
     /// Hash table corresponding to the build side
     join_data: Option<JoinLeftData>,
+    stats: Statistics,
 }
 
 impl HashProbeExec {
@@ -326,6 +327,8 @@ impl HashProbeExec {
         null_equals_null: bool,
         join_schema: SchemaRef,
         column_indices: Vec<ColumnIndex>,
+        cache: PlanProperties,
+        stats: Statistics,
     ) -> Result<Self> {
         let right_schema = right.schema();
         if on.is_empty() {
@@ -356,8 +359,9 @@ impl HashProbeExec {
             projection,
             column_indices,
             null_equals_null,
-            // cache,
+            cache,
             join_data: None,
+            stats
         })
     }
 
@@ -434,6 +438,8 @@ impl HashProbeExec {
             self.null_equals_null,
             self.join_schema.clone(),
             self.column_indices.clone(),
+            self.cache.clone(),
+            self.stats.clone()
         )
     }
 
@@ -603,8 +609,7 @@ impl ExecutionPlan for HashProbeExec {
     }
 
     fn properties(&self) -> &PlanProperties {
-        todo!()
-        // &self.cache
+        &self.cache
     }
 
     fn required_input_distribution(&self) -> Vec<Distribution> {
@@ -667,6 +672,8 @@ impl ExecutionPlan for HashProbeExec {
                 self.null_equals_null,
                 self.join_schema.clone(),
                 self.column_indices.clone(),
+                self.cache.clone(),
+                self.stats.clone()
             )?)),
             _ => internal_err!("SortMergeJoin wrong number of children"),
         }
@@ -773,7 +780,7 @@ impl ExecutionPlan for HashProbeExec {
         // TODO stats: it is not possible in general to know the output size of joins
         // There are some special cases though, for example:
         // - `A LEFT JOIN B ON A.col=B.col` with `COUNT_DISTINCT(B.col)=COUNT(B.col)`
-        todo!()
+        Ok(self.stats.clone())
         // let mut stats = estimate_join_statistics(
         //     self.left.clone(),
         //     self.right.clone(),
