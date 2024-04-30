@@ -307,7 +307,7 @@ pub struct HashProbeExec {
     /// Cache holding plan properties like equivalences, output partitioning etc.
     // cache: PlanProperties,
     /// Hash table corresponding to the build side
-    join_data: JoinLeftData,
+    join_data: Option<JoinLeftData>,
 }
 
 impl HashProbeExec {
@@ -324,25 +324,15 @@ impl HashProbeExec {
         projection: Option<Vec<usize>>,
         partition_mode: PartitionMode,
         null_equals_null: bool,
-        join_data: JoinLeftData,
+        join_schema: SchemaRef,
+        column_indices: Vec<ColumnIndex>,
     ) -> Result<Self> {
-        let left_schema = join_data.batch.schema();
         let right_schema = right.schema();
         if on.is_empty() {
             return plan_err!("On constraints in HashProbeExec should be non-empty");
         }
 
-        check_join_is_valid(&left_schema, &right_schema, &on)?;
-
-        let (join_schema, column_indices) =
-            build_join_schema(&left_schema, &right_schema, join_type);
-
         let random_state = RandomState::with_seeds(0, 0, 0, 0);
-
-        let join_schema = Arc::new(join_schema);
-
-        //  check if the projection is valid
-        can_project(&join_schema, projection.as_ref())?;
 
         // let cache = Self::compute_properties(
         //     &right,
@@ -367,7 +357,7 @@ impl HashProbeExec {
             column_indices,
             null_equals_null,
             // cache,
-            join_data,
+            join_data: None,
         })
     }
 
@@ -442,7 +432,8 @@ impl HashProbeExec {
             projection,
             self.mode,
             self.null_equals_null,
-            self.join_data.clone(),
+            self.join_schema.clone(),
+            self.column_indices.clone(),
         )
     }
 
@@ -674,7 +665,8 @@ impl ExecutionPlan for HashProbeExec {
                 self.projection.clone(),
                 self.mode,
                 self.null_equals_null,
-                self.join_data.clone(),
+                self.join_schema.clone(),
+                self.column_indices.clone(),
             )?)),
             _ => internal_err!("SortMergeJoin wrong number of children"),
         }
@@ -687,7 +679,12 @@ impl ExecutionPlan for HashProbeExec {
     ) -> Result<SendableRecordBatchStream> {
         let on_left = self.on.iter().map(|on| on.0.clone()).collect::<Vec<_>>();
         let on_right = self.on.iter().map(|on| on.1.clone()).collect::<Vec<_>>();
-        let left_partitions = self.join_data.output_partitioning.partition_count();
+        let left_partitions = self
+            .join_data
+            .as_ref()
+            .unwrap()
+            .output_partitioning
+            .partition_count();
         let right_partitions = self.right.output_partitioning().partition_count();
 
         if self.mode == PartitionMode::Partitioned && left_partitions != right_partitions
@@ -723,13 +720,14 @@ impl ExecutionPlan for HashProbeExec {
         if need_produce_result_in_final(self.join_type) {
             // TODO: Replace `ceil` wrapper with stable `div_cell` after
             // https://github.com/rust-lang/rust/issues/88581
-            let visited_bitmap_size = bit_util::ceil(self.join_data.num_rows(), 8);
+            let visited_bitmap_size =
+                bit_util::ceil(self.join_data.as_ref().as_ref().unwrap().num_rows(), 8);
             // self.reservation.try_grow(visited_bitmap_size)?;
             // self.join_metrics.build_mem_used.add(visited_bitmap_size);
         }
 
         let visited_left_side = if need_produce_result_in_final(self.join_type) {
-            let num_rows = self.join_data.num_rows();
+            let num_rows = self.join_data.as_ref().unwrap().num_rows();
             // Some join types need to track which row has be matched or unmatched:
             // `left semi` join:  need to use the bitmap to produce the matched row in the left side
             // `left` join:       need to use the bitmap to produce the unmatched row in the left side with null
@@ -743,7 +741,7 @@ impl ExecutionPlan for HashProbeExec {
         };
 
         let build_side = BuildSide::Ready(BuildSideReadyState {
-            left_data: Arc::new(self.join_data.clone()),
+            left_data: Arc::new(self.join_data.as_ref().unwrap().clone()),
             visited_left_side,
         });
         // set initial state to fetch probe batch to indicate that we do not

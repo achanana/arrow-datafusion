@@ -298,7 +298,7 @@ pub struct HashJoinExec {
     /// The projection indices of the columns in the output schema of join
     pub projection: Option<Vec<usize>>,
     /// Information of index and left / right placement of columns
-    column_indices: Vec<ColumnIndex>,
+    pub column_indices: Vec<ColumnIndex>,
     /// Null matching behavior: If `null_equals_null` is true, rows that have
     /// `null`s in both left and right equijoin columns will be matched.
     /// Otherwise, rows that have `null`s in the join columns will not be
