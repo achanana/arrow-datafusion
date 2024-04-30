@@ -361,7 +361,7 @@ impl HashProbeExec {
             null_equals_null,
             cache,
             join_data: None,
-            stats
+            stats,
         })
     }
 
@@ -439,7 +439,7 @@ impl HashProbeExec {
             self.join_schema.clone(),
             self.column_indices.clone(),
             self.cache.clone(),
-            self.stats.clone()
+            self.stats.clone(),
         )
     }
 
@@ -673,7 +673,7 @@ impl ExecutionPlan for HashProbeExec {
                 self.join_schema.clone(),
                 self.column_indices.clone(),
                 self.cache.clone(),
-                self.stats.clone()
+                self.stats.clone(),
             )?)),
             _ => internal_err!("SortMergeJoin wrong number of children"),
         }
