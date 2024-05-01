@@ -1576,7 +1576,7 @@ pub mod owned_table_reference {
 pub struct PhysicalPlanNode {
     #[prost(
         oneof = "physical_plan_node::PhysicalPlanType",
-        tags = "1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29"
+        tags = "1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31"
     )]
     pub physical_plan_type: ::core::option::Option<physical_plan_node::PhysicalPlanType>,
 }
@@ -1643,6 +1643,10 @@ pub mod physical_plan_node {
         CsvSink(::prost::alloc::boxed::Box<super::CsvSinkExecNode>),
         #[prost(message, tag = "29")]
         ParquetSink(::prost::alloc::boxed::Box<super::ParquetSinkExecNode>),
+        #[prost(message, tag = "30")]
+        HashBuild(::prost::alloc::boxed::Box<super::HashBuildExecNode>),
+        #[prost(message, tag = "31")]
+        HashProbe(::prost::alloc::boxed::Box<super::HashProbeExecNode>),
     }
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -2395,6 +2399,46 @@ pub struct AvroScanExecNode {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HashJoinExecNode {
+    #[prost(message, optional, boxed, tag = "1")]
+    pub left: ::core::option::Option<::prost::alloc::boxed::Box<PhysicalPlanNode>>,
+    #[prost(message, optional, boxed, tag = "2")]
+    pub right: ::core::option::Option<::prost::alloc::boxed::Box<PhysicalPlanNode>>,
+    #[prost(message, repeated, tag = "3")]
+    pub on: ::prost::alloc::vec::Vec<JoinOn>,
+    #[prost(enumeration = "JoinType", tag = "4")]
+    pub join_type: i32,
+    #[prost(enumeration = "PartitionMode", tag = "6")]
+    pub partition_mode: i32,
+    #[prost(bool, tag = "7")]
+    pub null_equals_null: bool,
+    #[prost(message, optional, tag = "8")]
+    pub filter: ::core::option::Option<JoinFilter>,
+    #[prost(uint32, repeated, tag = "9")]
+    pub projection: ::prost::alloc::vec::Vec<u32>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HashProbeExecNode {
+    #[prost(message, optional, boxed, tag = "1")]
+    pub left: ::core::option::Option<::prost::alloc::boxed::Box<PhysicalPlanNode>>,
+    #[prost(message, optional, boxed, tag = "2")]
+    pub right: ::core::option::Option<::prost::alloc::boxed::Box<PhysicalPlanNode>>,
+    #[prost(message, repeated, tag = "3")]
+    pub on: ::prost::alloc::vec::Vec<JoinOn>,
+    #[prost(enumeration = "JoinType", tag = "4")]
+    pub join_type: i32,
+    #[prost(enumeration = "PartitionMode", tag = "5")]
+    pub partition_mode: i32,
+    #[prost(bool, tag = "6")]
+    pub null_equals_null: bool,
+    #[prost(message, optional, tag = "7")]
+    pub filter: ::core::option::Option<JoinFilter>,
+    #[prost(uint32, repeated, tag = "8")]
+    pub projection: ::prost::alloc::vec::Vec<u32>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HashBuildExecNode {
     #[prost(message, optional, boxed, tag = "1")]
     pub left: ::core::option::Option<::prost::alloc::boxed::Box<PhysicalPlanNode>>,
     #[prost(message, optional, boxed, tag = "2")]

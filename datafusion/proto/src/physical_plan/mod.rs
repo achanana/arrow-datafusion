@@ -61,7 +61,8 @@ use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::insert::FileSinkExec;
 use datafusion::physical_plan::joins::utils::{ColumnIndex, JoinFilter};
 use datafusion::physical_plan::joins::{
-    CrossJoinExec, NestedLoopJoinExec, StreamJoinPartitionMode, SymmetricHashJoinExec,
+    CrossJoinExec, HashBuildExec, HashProbeExec, NestedLoopJoinExec,
+    StreamJoinPartitionMode, SymmetricHashJoinExec,
 };
 use datafusion::physical_plan::joins::{HashJoinExec, PartitionMode};
 use datafusion::physical_plan::limit::{GlobalLimitExec, LocalLimitExec};
@@ -538,6 +539,222 @@ impl AsExecutionPlan for PhysicalPlanNode {
                     physical_filter_expr,
                     input,
                     physical_schema,
+                )?))
+            }
+            PhysicalPlanType::HashProbe(hashjoin) => {
+                let left: Arc<dyn ExecutionPlan> = into_physical_plan(
+                    &hashjoin.left,
+                    registry,
+                    runtime,
+                    extension_codec,
+                )?;
+                let right: Arc<dyn ExecutionPlan> = into_physical_plan(
+                    &hashjoin.right,
+                    registry,
+                    runtime,
+                    extension_codec,
+                )?;
+                let left_schema = left.schema();
+                let right_schema = right.schema();
+                let on: Vec<(PhysicalExprRef, PhysicalExprRef)> = hashjoin
+                    .on
+                    .iter()
+                    .map(|col| {
+                        let left = parse_physical_expr(
+                            &col.left.clone().unwrap(),
+                            registry,
+                            left_schema.as_ref(),
+                            extension_codec,
+                        )?;
+                        let right = parse_physical_expr(
+                            &col.right.clone().unwrap(),
+                            registry,
+                            right_schema.as_ref(),
+                            extension_codec,
+                        )?;
+                        Ok((left, right))
+                    })
+                    .collect::<Result<_>>()?;
+                let join_type = protobuf::JoinType::try_from(hashjoin.join_type)
+                    .map_err(|_| {
+                        proto_error(format!(
+                            "Received a HashJoinNode message with unknown JoinType {}",
+                            hashjoin.join_type
+                        ))
+                    })?;
+                let filter = hashjoin
+                    .filter
+                    .as_ref()
+                    .map(|f| {
+                        let schema = f
+                            .schema
+                            .as_ref()
+                            .ok_or_else(|| proto_error("Missing JoinFilter schema"))?
+                            .try_into()?;
+
+                        let expression = parse_physical_expr(
+                            f.expression.as_ref().ok_or_else(|| {
+                                proto_error("Unexpected empty filter expression")
+                            })?,
+                            registry, &schema,
+                            extension_codec,
+                        )?;
+                        let column_indices = f.column_indices
+                            .iter()
+                            .map(|i| {
+                                let side = protobuf::JoinSide::try_from(i.side)
+                                    .map_err(|_| proto_error(format!(
+                                        "Received a HashJoinNode message with JoinSide in Filter {}",
+                                        i.side))
+                                    )?;
+
+                                Ok(ColumnIndex {
+                                    index: i.index as usize,
+                                    side: side.into(),
+                                })
+                            })
+                            .collect::<Result<Vec<_>>>()?;
+
+                        Ok(JoinFilter::new(expression, column_indices, schema))
+                    })
+                    .map_or(Ok(None), |v: Result<JoinFilter>| v.map(Some))?;
+
+                let partition_mode = protobuf::PartitionMode::try_from(
+                    hashjoin.partition_mode,
+                )
+                .map_err(|_| {
+                    proto_error(format!(
+                        "Received a HashJoinNode message with unknown PartitionMode {}",
+                        hashjoin.partition_mode
+                    ))
+                })?;
+                let partition_mode = match partition_mode {
+                    protobuf::PartitionMode::CollectLeft => PartitionMode::CollectLeft,
+                    protobuf::PartitionMode::Partitioned => PartitionMode::Partitioned,
+                    protobuf::PartitionMode::Auto => PartitionMode::Auto,
+                };
+                let projection = if !hashjoin.projection.is_empty() {
+                    Some(
+                        hashjoin
+                            .projection
+                            .iter()
+                            .map(|i| *i as usize)
+                            .collect::<Vec<_>>(),
+                    )
+                } else {
+                    None
+                };
+                Ok(Arc::new(HashProbeExec::try_new(
+                    left,
+                    right,
+                    on,
+                    filter,
+                    &join_type.into(),
+                    projection,
+                    partition_mode,
+                    hashjoin.null_equals_null,
+                    None,
+                    None,
+                )?))
+            }
+            PhysicalPlanType::HashBuild(hashjoin) => {
+                let left: Arc<dyn ExecutionPlan> = into_physical_plan(
+                    &hashjoin.left,
+                    registry,
+                    runtime,
+                    extension_codec,
+                )?;
+                let left_schema = left.schema();
+                let on: Vec<(PhysicalExprRef)> = hashjoin
+                    .on
+                    .iter()
+                    .map(|col| {
+                        let left = parse_physical_expr(
+                            &col.left.clone().unwrap(),
+                            registry,
+                            left_schema.as_ref(),
+                            extension_codec,
+                        )?;
+                        Ok(left)
+                    })
+                    .collect::<Result<_>>()?;
+                let join_type = protobuf::JoinType::try_from(hashjoin.join_type)
+                    .map_err(|_| {
+                        proto_error(format!(
+                            "Received a HashJoinNode message with unknown JoinType {}",
+                            hashjoin.join_type
+                        ))
+                    })?;
+                let filter = hashjoin
+                    .filter
+                    .as_ref()
+                    .map(|f| {
+                        let schema = f
+                            .schema
+                            .as_ref()
+                            .ok_or_else(|| proto_error("Missing JoinFilter schema"))?
+                            .try_into()?;
+
+                        let expression = parse_physical_expr(
+                            f.expression.as_ref().ok_or_else(|| {
+                                proto_error("Unexpected empty filter expression")
+                            })?,
+                            registry, &schema,
+                            extension_codec,
+                        )?;
+                        let column_indices = f.column_indices
+                            .iter()
+                            .map(|i| {
+                                let side = protobuf::JoinSide::try_from(i.side)
+                                    .map_err(|_| proto_error(format!(
+                                        "Received a HashJoinNode message with JoinSide in Filter {}",
+                                        i.side))
+                                    )?;
+
+                                Ok(ColumnIndex {
+                                    index: i.index as usize,
+                                    side: side.into(),
+                                })
+                            })
+                            .collect::<Result<Vec<_>>>()?;
+
+                        Ok(JoinFilter::new(expression, column_indices, schema))
+                    })
+                    .map_or(Ok(None), |v: Result<JoinFilter>| v.map(Some))?;
+
+                let partition_mode = protobuf::PartitionMode::try_from(
+                    hashjoin.partition_mode,
+                )
+                .map_err(|_| {
+                    proto_error(format!(
+                        "Received a HashJoinNode message with unknown PartitionMode {}",
+                        hashjoin.partition_mode
+                    ))
+                })?;
+                let partition_mode = match partition_mode {
+                    protobuf::PartitionMode::CollectLeft => PartitionMode::CollectLeft,
+                    protobuf::PartitionMode::Partitioned => PartitionMode::Partitioned,
+                    protobuf::PartitionMode::Auto => PartitionMode::Auto,
+                };
+                let projection = if !hashjoin.projection.is_empty() {
+                    Some(
+                        hashjoin
+                            .projection
+                            .iter()
+                            .map(|i| *i as usize)
+                            .collect::<Vec<_>>(),
+                    )
+                } else {
+                    None
+                };
+                Ok(Arc::new(HashBuildExec::try_new(
+                    left,
+                    on,
+                    filter,
+                    &join_type.into(),
+                    projection,
+                    partition_mode,
+                    hashjoin.null_equals_null,
                 )?))
             }
             PhysicalPlanType::HashJoin(hashjoin) => {
@@ -1279,6 +1496,150 @@ impl AsExecutionPlan for PhysicalPlanNode {
                     protobuf::HashJoinExecNode {
                         left: Some(Box::new(left)),
                         right: Some(Box::new(right)),
+                        on,
+                        join_type: join_type.into(),
+                        partition_mode: partition_mode.into(),
+                        null_equals_null: exec.null_equals_null(),
+                        filter,
+                        projection: exec.projection.as_ref().map_or_else(Vec::new, |v| {
+                            v.iter().map(|x| *x as u32).collect::<Vec<u32>>()
+                        }),
+                    },
+                ))),
+            });
+        }
+
+        if let Some(exec) = plan.downcast_ref::<HashProbeExec>() {
+            let left = protobuf::PhysicalPlanNode::try_from_physical_plan(
+                exec.left().to_owned(),
+                extension_codec,
+            )?;
+            let right = protobuf::PhysicalPlanNode::try_from_physical_plan(
+                exec.right().to_owned(),
+                extension_codec,
+            )?;
+            let on: Vec<protobuf::JoinOn> = exec
+                .on()
+                .iter()
+                .map(|tuple| {
+                    let l = serialize_physical_expr(tuple.0.to_owned(), extension_codec)?;
+                    let r = serialize_physical_expr(tuple.1.to_owned(), extension_codec)?;
+                    Ok::<_, DataFusionError>(protobuf::JoinOn {
+                        left: Some(l),
+                        right: Some(r),
+                    })
+                })
+                .collect::<Result<_>>()?;
+            let join_type: protobuf::JoinType = exec.join_type().to_owned().into();
+            let filter = exec
+                .filter()
+                .as_ref()
+                .map(|f| {
+                    let expression = serialize_physical_expr(
+                        f.expression().to_owned(),
+                        extension_codec,
+                    )?;
+                    let column_indices = f
+                        .column_indices()
+                        .iter()
+                        .map(|i| {
+                            let side: protobuf::JoinSide = i.side.to_owned().into();
+                            protobuf::ColumnIndex {
+                                index: i.index as u32,
+                                side: side.into(),
+                            }
+                        })
+                        .collect();
+                    let schema = f.schema().try_into()?;
+                    Ok(protobuf::JoinFilter {
+                        expression: Some(expression),
+                        column_indices,
+                        schema: Some(schema),
+                    })
+                })
+                .map_or(Ok(None), |v: Result<protobuf::JoinFilter>| v.map(Some))?;
+
+            let partition_mode = match exec.partition_mode() {
+                PartitionMode::CollectLeft => protobuf::PartitionMode::CollectLeft,
+                PartitionMode::Partitioned => protobuf::PartitionMode::Partitioned,
+                PartitionMode::Auto => protobuf::PartitionMode::Auto,
+            };
+
+            return Ok(protobuf::PhysicalPlanNode {
+                physical_plan_type: Some(PhysicalPlanType::HashProbe(Box::new(
+                    protobuf::HashProbeExecNode {
+                        left: Some(Box::new(left)),
+                        right: Some(Box::new(right)),
+                        on,
+                        join_type: join_type.into(),
+                        partition_mode: partition_mode.into(),
+                        null_equals_null: exec.null_equals_null(),
+                        filter,
+                        projection: exec.projection.as_ref().map_or_else(Vec::new, |v| {
+                            v.iter().map(|x| *x as u32).collect::<Vec<u32>>()
+                        }),
+                    },
+                ))),
+            });
+        }
+
+        if let Some(exec) = plan.downcast_ref::<HashBuildExec>() {
+            let left = protobuf::PhysicalPlanNode::try_from_physical_plan(
+                exec.input.to_owned(),
+                extension_codec,
+            )?;
+            let on: Vec<protobuf::JoinOn> = exec
+                .on()
+                .iter()
+                .map(|tuple| {
+                    // let l = serialize_physical_expr(tuple.0.to_owned(), extension_codec)?;
+                    // let r = serialize_physical_expr(tuple.1.to_owned(), extension_codec)?;
+                    Ok::<_, DataFusionError>(protobuf::JoinOn {
+                        left: None,
+                        right: None,
+                    })
+                })
+                .collect::<Result<_>>()?;
+            let join_type: protobuf::JoinType = exec.join_type().to_owned().into();
+            let filter = exec
+                .filter()
+                .as_ref()
+                .map(|f| {
+                    let expression = serialize_physical_expr(
+                        f.expression().to_owned(),
+                        extension_codec,
+                    )?;
+                    let column_indices = f
+                        .column_indices()
+                        .iter()
+                        .map(|i| {
+                            let side: protobuf::JoinSide = i.side.to_owned().into();
+                            protobuf::ColumnIndex {
+                                index: i.index as u32,
+                                side: side.into(),
+                            }
+                        })
+                        .collect();
+                    let schema = f.schema().try_into()?;
+                    Ok(protobuf::JoinFilter {
+                        expression: Some(expression),
+                        column_indices,
+                        schema: Some(schema),
+                    })
+                })
+                .map_or(Ok(None), |v: Result<protobuf::JoinFilter>| v.map(Some))?;
+
+            let partition_mode = match exec.partition_mode() {
+                PartitionMode::CollectLeft => protobuf::PartitionMode::CollectLeft,
+                PartitionMode::Partitioned => protobuf::PartitionMode::Partitioned,
+                PartitionMode::Auto => protobuf::PartitionMode::Auto,
+            };
+
+            return Ok(protobuf::PhysicalPlanNode {
+                physical_plan_type: Some(PhysicalPlanType::HashBuild(Box::new(
+                    protobuf::HashBuildExecNode {
+                        left: Some(Box::new(left)),
+                        right: None,
                         on,
                         join_type: join_type.into(),
                         partition_mode: partition_mode.into(),

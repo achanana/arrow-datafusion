@@ -277,6 +277,8 @@ impl JoinLeftData {
 #[derive(Debug)]
 pub struct HashProbeExec {
     /// right (probe) side which are filtered by the hash table
+    pub left: Arc<dyn ExecutionPlan>,
+    /// right (probe) side which are filtered by the hash table
     pub right: Arc<dyn ExecutionPlan>,
     /// Set of equijoin columns from the relations: `(left_col, right_col)`
     pub on: Vec<(PhysicalExprRef, PhysicalExprRef)>,
@@ -305,10 +307,10 @@ pub struct HashProbeExec {
     /// matched and thus will not appear in the output.
     pub null_equals_null: bool,
     /// Cache holding plan properties like equivalences, output partitioning etc.
-    cache: PlanProperties,
+    cache: Option<PlanProperties>,
     /// Hash table corresponding to the build side
     join_data: Option<JoinLeftData>,
-    stats: Statistics,
+    stats: Option<Statistics>,
 }
 
 impl HashProbeExec {
@@ -318,6 +320,7 @@ impl HashProbeExec {
     /// This function errors when it is not possible to join the left and right sides on keys `on`.
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
+        left: Arc<dyn ExecutionPlan>,
         right: Arc<dyn ExecutionPlan>,
         on: JoinOn,
         filter: Option<JoinFilter>,
@@ -325,11 +328,10 @@ impl HashProbeExec {
         projection: Option<Vec<usize>>,
         partition_mode: PartitionMode,
         null_equals_null: bool,
-        join_schema: SchemaRef,
-        column_indices: Vec<ColumnIndex>,
-        cache: PlanProperties,
-        stats: Statistics,
+        cache: Option<PlanProperties>,
+        stats: Option<Statistics>,
     ) -> Result<Self> {
+        let left_schema = left.schema();
         let right_schema = right.schema();
         if on.is_empty() {
             return plan_err!("On constraints in HashProbeExec should be non-empty");
@@ -345,8 +347,12 @@ impl HashProbeExec {
         //     partition_mode,
         //     projection.as_ref(),
         // )?;
+        let (join_schema, column_indices) =
+            build_join_schema(&left_schema, &right_schema, join_type);
+        let join_schema = Arc::new(join_schema);
 
         Ok(HashProbeExec {
+            left,
             right,
             on,
             filter,
@@ -363,6 +369,11 @@ impl HashProbeExec {
             join_data: None,
             stats,
         })
+    }
+
+    /// right (probe) side which are filtered by the hash table
+    pub fn left(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.left
     }
 
     /// right (probe) side which are filtered by the hash table
@@ -429,6 +440,7 @@ impl HashProbeExec {
             None => None,
         };
         Self::try_new(
+            self.left.clone(),
             self.right.clone(),
             self.on.clone(),
             self.filter.clone(),
@@ -436,8 +448,6 @@ impl HashProbeExec {
             projection,
             self.mode,
             self.null_equals_null,
-            self.join_schema.clone(),
-            self.column_indices.clone(),
             self.cache.clone(),
             self.stats.clone(),
         )
@@ -609,7 +619,7 @@ impl ExecutionPlan for HashProbeExec {
     }
 
     fn properties(&self) -> &PlanProperties {
-        &self.cache
+        &self.cache.as_ref().unwrap()
     }
 
     fn required_input_distribution(&self) -> Vec<Distribution> {
@@ -663,6 +673,7 @@ impl ExecutionPlan for HashProbeExec {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         match &children[..] {
             [right] => Ok(Arc::new(HashProbeExec::try_new(
+                self.left.clone(),
                 right.clone(),
                 self.on.clone(),
                 self.filter.clone(),
@@ -670,12 +681,10 @@ impl ExecutionPlan for HashProbeExec {
                 self.projection.clone(),
                 self.mode,
                 self.null_equals_null,
-                self.join_schema.clone(),
-                self.column_indices.clone(),
                 self.cache.clone(),
                 self.stats.clone(),
             )?)),
-            _ => internal_err!("SortMergeJoin wrong number of children"),
+            _ => internal_err!("HashProbe wrong number of children"),
         }
     }
 
@@ -780,7 +789,10 @@ impl ExecutionPlan for HashProbeExec {
         // TODO stats: it is not possible in general to know the output size of joins
         // There are some special cases though, for example:
         // - `A LEFT JOIN B ON A.col=B.col` with `COUNT_DISTINCT(B.col)=COUNT(B.col)`
-        Ok(self.stats.clone())
+        match self.stats.as_ref() {
+            Some(stats) => Ok(stats.clone()),
+            None => Err(DataFusionError::Internal("Stats not present!".to_string())),
+        }
         // let mut stats = estimate_join_statistics(
         //     self.left.clone(),
         //     self.right.clone(),

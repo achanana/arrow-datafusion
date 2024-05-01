@@ -1210,6 +1210,8 @@ message PhysicalPlanNode {
     PlaceholderRowExecNode placeholder_row = 27;
     CsvSinkExecNode csv_sink = 28;
     ParquetSinkExecNode parquet_sink = 29;
+    HashBuildExecNode hash_build = 30;
+    HashProbeExecNode hash_probe = 31;
   }
 }
 
@@ -1643,6 +1645,28 @@ enum PartitionMode {
 }
 
 message HashJoinExecNode {
+  PhysicalPlanNode left = 1;
+  PhysicalPlanNode right = 2;
+  repeated JoinOn on = 3;
+  JoinType join_type = 4;
+  PartitionMode partition_mode = 6;
+  bool null_equals_null = 7;
+  JoinFilter filter = 8;
+  repeated uint32 projection = 9;
+}
+
+message HashProbeExecNode {
+  PhysicalPlanNode left = 1;
+  PhysicalPlanNode right = 2;
+  repeated JoinOn on = 3;
+  JoinType join_type = 4;
+  PartitionMode partition_mode = 5;
+  bool null_equals_null = 6;
+  JoinFilter filter = 7;
+  repeated uint32 projection = 8;
+}
+
+message HashBuildExecNode {
   PhysicalPlanNode left = 1;
   PhysicalPlanNode right = 2;
   repeated JoinOn on = 3;
