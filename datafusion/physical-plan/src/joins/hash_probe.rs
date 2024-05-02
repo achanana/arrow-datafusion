@@ -741,7 +741,7 @@ impl ExecutionPlan for HashProbeExec {
             // TODO: Replace `ceil` wrapper with stable `div_cell` after
             // https://github.com/rust-lang/rust/issues/88581
             let visited_bitmap_size =
-                bit_util::ceil(self.join_data.as_ref().as_ref().unwrap().num_rows(), 8);
+                bit_util::ceil(self.join_data.as_ref().unwrap().num_rows(), 8);
             // self.reservation.try_grow(visited_bitmap_size)?;
             // self.join_metrics.build_mem_used.add(visited_bitmap_size);
         }
