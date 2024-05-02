@@ -34,7 +34,7 @@ use crate::{
     joins::utils::{
         adjust_indices_by_join_type, adjust_right_output_partitioning,
         apply_join_filter_to_indices, build_batch_from_indices, build_join_schema,
-        check_join_is_valid, estimate_join_statistics, get_final_indices_from_bit_map,
+        check_join_is_valid, get_final_indices_from_bit_map,
         need_produce_result_in_final, partitioned_join_output_partitioning,
         BuildProbeJoinMetrics, ColumnIndex, JoinFilter, JoinHashMap, JoinHashMapOffset,
         JoinHashMapType, JoinOn, JoinOnRef, StatefulStreamResult,
@@ -722,21 +722,21 @@ impl ExecutionPlan for HashProbeExec {
     ) -> Result<SendableRecordBatchStream> {
         let on_left = self.on.iter().map(|on| on.0.clone()).collect::<Vec<_>>();
         let on_right = self.on.iter().map(|on| on.1.clone()).collect::<Vec<_>>();
-        let left_partitions = self
+        let _left_partitions = self
             .join_data
             .as_ref()
             .unwrap()
             .output_partitioning
             .partition_count();
-        let right_partitions = self.right.output_partitioning().partition_count();
+        let _right_partitions = self.right.output_partitioning().partition_count();
 
-        if self.mode == PartitionMode::Partitioned && left_partitions != right_partitions
-        {
-            return internal_err!(
-                "Invalid HashProbeExec, partition count mismatch {left_partitions}!={right_partitions},\
-                 consider using RepartitionExec"
-            );
-        }
+        // if self.mode == PartitionMode::Partitioned && left_partitions != right_partitions
+        // {
+        //     return internal_err!(
+        //         "Invalid HashProbeExec, partition count mismatch {left_partitions}!={right_partitions},\
+        //          consider using RepartitionExec"
+        //     );
+        // }
 
         let join_metrics = BuildProbeJoinMetrics::new(partition, &self.metrics);
 
