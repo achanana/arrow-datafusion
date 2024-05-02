@@ -108,8 +108,6 @@ impl JoinLeftData {
     }
 }
 
-pub struct HashBuildResult {}
-
 /// Join execution plan: Evaluates eqijoin predicates in parallel on multiple
 /// partitions using a hash table and an optional filter list to apply post
 /// join.
@@ -334,10 +332,6 @@ impl HashBuildExec {
             null_equals_null,
             cache,
         })
-    }
-
-    pub fn get(_result: &HashBuildResult) -> Arc<dyn ExecutionPlan> {
-        todo!()
     }
 
     /// left (build) side which gets hashed

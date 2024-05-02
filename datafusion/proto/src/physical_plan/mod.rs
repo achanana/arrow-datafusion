@@ -654,7 +654,6 @@ impl AsExecutionPlan for PhysicalPlanNode {
                     partition_mode,
                     hashjoin.null_equals_null,
                     None,
-                    None,
                 )?))
             }
             PhysicalPlanType::HashBuild(hashjoin) => {

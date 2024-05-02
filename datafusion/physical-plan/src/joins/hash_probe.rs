@@ -29,18 +29,20 @@ use super::{
 use crate::ExecutionPlanProperties;
 use crate::{
     common::can_project,
-    handle_state,
+    execution_mode_from_children, handle_state,
     hash_utils::create_hashes,
     joins::utils::{
-        adjust_indices_by_join_type, apply_join_filter_to_indices,
-        build_batch_from_indices, build_join_schema, get_final_indices_from_bit_map,
-        need_produce_result_in_final, BuildProbeJoinMetrics, ColumnIndex, JoinFilter,
-        JoinHashMap, JoinHashMapOffset, JoinHashMapType, JoinOn, JoinOnRef,
-        StatefulStreamResult,
+        adjust_indices_by_join_type, adjust_right_output_partitioning,
+        apply_join_filter_to_indices, build_batch_from_indices, build_join_schema,
+        check_join_is_valid, estimate_join_statistics, get_final_indices_from_bit_map,
+        need_produce_result_in_final, partitioned_join_output_partitioning,
+        BuildProbeJoinMetrics, ColumnIndex, JoinFilter, JoinHashMap, JoinHashMapOffset,
+        JoinHashMapType, JoinOn, JoinOnRef, StatefulStreamResult,
     },
     metrics::{ExecutionPlanMetricsSet, MetricsSet},
-    DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, Partitioning,
-    PlanProperties, RecordBatchStream, SendableRecordBatchStream, Statistics,
+    DisplayAs, DisplayFormatType, Distribution, ExecutionMode, ExecutionPlan,
+    Partitioning, PlanProperties, RecordBatchStream, SendableRecordBatchStream,
+    Statistics,
 };
 
 use arrow::array::{
@@ -55,12 +57,15 @@ use arrow::util::bit_util;
 use arrow_array::cast::downcast_array;
 use arrow_schema::ArrowError;
 use datafusion_common::{
-    internal_datafusion_err, internal_err, plan_err, DataFusionError, JoinSide, JoinType,
-    Result,
+    internal_datafusion_err, internal_err, plan_err, project_schema, DataFusionError,
+    JoinSide, JoinType, Result,
 };
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
 use datafusion_execution::TaskContext;
-
+use datafusion_physical_expr::equivalence::{
+    join_equivalence_properties, ProjectionMapping,
+};
+use datafusion_physical_expr::expressions::UnKnownColumn;
 use datafusion_physical_expr::{PhysicalExpr, PhysicalExprRef};
 
 use ahash::RandomState;
@@ -325,7 +330,6 @@ impl HashProbeExec {
         projection: Option<Vec<usize>>,
         partition_mode: PartitionMode,
         null_equals_null: bool,
-        cache: Option<PlanProperties>,
         stats: Option<Statistics>,
     ) -> Result<Self> {
         let left_schema = left.schema();
@@ -334,19 +338,27 @@ impl HashProbeExec {
             return plan_err!("On constraints in HashProbeExec should be non-empty");
         }
 
-        let random_state = RandomState::with_seeds(0, 0, 0, 0);
+        check_join_is_valid(&left_schema, &right_schema, &on)?;
 
-        // let cache = Self::compute_properties(
-        //     &right,
-        //     join_schema.clone(),
-        //     *join_type,
-        //     &on,
-        //     partition_mode,
-        //     projection.as_ref(),
-        // )?;
         let (join_schema, column_indices) =
             build_join_schema(&left_schema, &right_schema, join_type);
+
+        let random_state = RandomState::with_seeds(0, 0, 0, 0);
+
         let join_schema = Arc::new(join_schema);
+
+        //  check if the projection is valid
+        can_project(&join_schema, projection.as_ref())?;
+
+        let cache = Self::compute_properties(
+            &left,
+            &right,
+            join_schema.clone(),
+            *join_type,
+            &on,
+            partition_mode,
+            projection.as_ref(),
+        )?;
 
         Ok(HashProbeExec {
             left,
@@ -362,7 +374,7 @@ impl HashProbeExec {
             projection,
             column_indices,
             null_equals_null,
-            cache,
+            cache: Some(cache),
             join_data: None,
             stats,
         })
@@ -445,107 +457,106 @@ impl HashProbeExec {
             projection,
             self.mode,
             self.null_equals_null,
-            self.cache.clone(),
             self.stats.clone(),
         )
     }
 
     /// This function creates the cache object that stores the plan properties such as schema, equivalence properties, ordering, partitioning, etc.
     fn compute_properties(
-        _right: &Arc<dyn ExecutionPlan>,
-        _schema: SchemaRef,
-        _join_type: JoinType,
-        _on: JoinOnRef,
-        _mode: PartitionMode,
-        _projection: Option<&Vec<usize>>,
+        left: &Arc<dyn ExecutionPlan>,
+        right: &Arc<dyn ExecutionPlan>,
+        schema: SchemaRef,
+        join_type: JoinType,
+        on: JoinOnRef,
+        mode: PartitionMode,
+        projection: Option<&Vec<usize>>,
     ) -> Result<PlanProperties> {
-        todo!();
         // Calculate equivalence properties:
-        // let mut eq_properties = join_equivalence_properties(
-        //     left.equivalence_properties().clone(),
-        //     right.equivalence_properties().clone(),
-        //     &join_type,
-        //     schema.clone(),
-        //     &Self::maintains_input_order(join_type),
-        //     Some(Self::probe_side()),
-        //     on,
-        // );
+        let mut eq_properties = join_equivalence_properties(
+            left.equivalence_properties().clone(),
+            right.equivalence_properties().clone(),
+            &join_type,
+            schema.clone(),
+            &Self::maintains_input_order(join_type),
+            Some(Self::probe_side()),
+            on,
+        );
 
-        // // Get output partitioning:
-        // let left_columns_len = left.schema().fields.len();
-        // let mut output_partitioning = match mode {
-        //     PartitionMode::CollectLeft => match join_type {
-        //         JoinType::Inner | JoinType::Right => adjust_right_output_partitioning(
-        //             right.output_partitioning(),
-        //             left_columns_len,
-        //         ),
-        //         JoinType::RightSemi | JoinType::RightAnti => {
-        //             right.output_partitioning().clone()
-        //         }
-        //         JoinType::Left
-        //         | JoinType::LeftSemi
-        //         | JoinType::LeftAnti
-        //         | JoinType::Full => Partitioning::UnknownPartitioning(
-        //             right.output_partitioning().partition_count(),
-        //         ),
-        //     },
-        //     PartitionMode::Partitioned => partitioned_join_output_partitioning(
-        //         join_type,
-        //         left.output_partitioning(),
-        //         right.output_partitioning(),
-        //         left_columns_len,
-        //     ),
-        //     PartitionMode::Auto => Partitioning::UnknownPartitioning(
-        //         right.output_partitioning().partition_count(),
-        //     ),
-        // };
+        // Get output partitioning:
+        let left_columns_len = left.schema().fields.len();
+        let mut output_partitioning = match mode {
+            PartitionMode::CollectLeft => match join_type {
+                JoinType::Inner | JoinType::Right => adjust_right_output_partitioning(
+                    right.output_partitioning(),
+                    left_columns_len,
+                ),
+                JoinType::RightSemi | JoinType::RightAnti => {
+                    right.output_partitioning().clone()
+                }
+                JoinType::Left
+                | JoinType::LeftSemi
+                | JoinType::LeftAnti
+                | JoinType::Full => Partitioning::UnknownPartitioning(
+                    right.output_partitioning().partition_count(),
+                ),
+            },
+            PartitionMode::Partitioned => partitioned_join_output_partitioning(
+                join_type,
+                left.output_partitioning(),
+                right.output_partitioning(),
+                left_columns_len,
+            ),
+            PartitionMode::Auto => Partitioning::UnknownPartitioning(
+                right.output_partitioning().partition_count(),
+            ),
+        };
 
-        // // Determine execution mode by checking whether this join is pipeline
-        // // breaking. This happens when the left side is unbounded, or the right
-        // // side is unbounded with `Left`, `Full`, `LeftAnti` or `LeftSemi` join types.
-        // let pipeline_breaking = left.execution_mode().is_unbounded()
-        //     || (right.execution_mode().is_unbounded()
-        //         && matches!(
-        //             join_type,
-        //             JoinType::Left
-        //                 | JoinType::Full
-        //                 | JoinType::LeftAnti
-        //                 | JoinType::LeftSemi
-        //         ));
+        // Determine execution mode by checking whether this join is pipeline
+        // breaking. This happens when the left side is unbounded, or the right
+        // side is unbounded with `Left`, `Full`, `LeftAnti` or `LeftSemi` join types.
+        let pipeline_breaking = left.execution_mode().is_unbounded()
+            || (right.execution_mode().is_unbounded()
+                && matches!(
+                    join_type,
+                    JoinType::Left
+                        | JoinType::Full
+                        | JoinType::LeftAnti
+                        | JoinType::LeftSemi
+                ));
 
-        // let mode = if pipeline_breaking {
-        //     ExecutionMode::PipelineBreaking
-        // } else {
-        //     execution_mode_from_children([left, right])
-        // };
+        let mode = if pipeline_breaking {
+            ExecutionMode::PipelineBreaking
+        } else {
+            execution_mode_from_children([left, right])
+        };
 
-        // // If contains projection, update the PlanProperties.
-        // if let Some(projection) = projection {
-        //     let projection_exprs = project_index_to_exprs(projection, &schema);
-        //     // construct a map from the input expressions to the output expression of the Projection
-        //     let projection_mapping =
-        //         ProjectionMapping::try_new(&projection_exprs, &schema)?;
-        //     let out_schema = project_schema(&schema, Some(projection))?;
-        //     if let Partitioning::Hash(exprs, part) = output_partitioning {
-        //         let normalized_exprs = exprs
-        //             .iter()
-        //             .map(|expr| {
-        //                 eq_properties
-        //                     .project_expr(expr, &projection_mapping)
-        //                     .unwrap_or_else(|| {
-        //                         Arc::new(UnKnownColumn::new(&expr.to_string()))
-        //                     })
-        //             })
-        //             .collect();
-        //         output_partitioning = Partitioning::Hash(normalized_exprs, part);
-        //     }
-        //     eq_properties = eq_properties.project(&projection_mapping, out_schema);
-        // }
-        // Ok(PlanProperties::new(
-        //     eq_properties,
-        //     output_partitioning,
-        //     mode,
-        // ))
+        // If contains projection, update the PlanProperties.
+        if let Some(projection) = projection {
+            let projection_exprs = project_index_to_exprs(projection, &schema);
+            // construct a map from the input expressions to the output expression of the Projection
+            let projection_mapping =
+                ProjectionMapping::try_new(&projection_exprs, &schema)?;
+            let out_schema = project_schema(&schema, Some(projection))?;
+            if let Partitioning::Hash(exprs, part) = output_partitioning {
+                let normalized_exprs = exprs
+                    .iter()
+                    .map(|expr| {
+                        eq_properties
+                            .project_expr(expr, &projection_mapping)
+                            .unwrap_or_else(|| {
+                                Arc::new(UnKnownColumn::new(&expr.to_string()))
+                            })
+                    })
+                    .collect();
+                output_partitioning = Partitioning::Hash(normalized_exprs, part);
+            }
+            eq_properties = eq_properties.project(&projection_mapping, out_schema);
+        }
+        Ok(PlanProperties::new(
+            eq_properties,
+            output_partitioning,
+            mode,
+        ))
     }
 }
 
@@ -616,7 +627,10 @@ impl ExecutionPlan for HashProbeExec {
     }
 
     fn properties(&self) -> &PlanProperties {
-        self.cache.as_ref().unwrap()
+        match self.cache.as_ref() {
+            Some(props) => props,
+            None => self.right.properties(),
+        }
     }
 
     fn required_input_distribution(&self) -> Vec<Distribution> {
@@ -661,29 +675,45 @@ impl ExecutionPlan for HashProbeExec {
     }
 
     fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
-        vec![self.right.clone()]
+        vec![self.left.clone(), self.right.clone()]
     }
 
     fn with_new_children(
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        match &children[..] {
-            [right] => Ok(Arc::new(HashProbeExec::try_new(
-                self.left.clone(),
-                right.clone(),
-                self.on.clone(),
-                self.filter.clone(),
-                &self.join_type,
-                self.projection.clone(),
-                self.mode,
-                self.null_equals_null,
-                self.cache.clone(),
-                self.stats.clone(),
-            )?)),
-            _ => internal_err!("HashProbe wrong number of children"),
-        }
+        Ok(Arc::new(HashProbeExec::try_new(
+            children[0].clone(),
+            children[1].clone(),
+            self.on.clone(),
+            self.filter.clone(),
+            &self.join_type,
+            self.projection.clone(),
+            self.mode,
+            self.null_equals_null,
+            self.stats.clone(),
+        )?))
     }
+    // fn with_new_children(
+    //     self: Arc<Self>,
+    //     children: Vec<Arc<dyn ExecutionPlan>>,
+    // ) -> Result<Arc<dyn ExecutionPlan>> {
+    //     match &children[..] {
+    //         [right] => Ok(Arc::new(HashProbeExec::try_new(
+    //             self.left.clone(),
+    //             right.clone(),
+    //             self.on.clone(),
+    //             self.filter.clone(),
+    //             &self.join_type,
+    //             self.projection.clone(),
+    //             self.mode,
+    //             self.null_equals_null,
+    //             self.cache.clone(),
+    //             self.stats.clone(),
+    //         )?)),
+    //         _ => internal_err!("HashProbe wrong number of children"),
+    //     }
+    // }
 
     fn execute(
         &self,
