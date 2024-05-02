@@ -665,7 +665,7 @@ impl AsExecutionPlan for PhysicalPlanNode {
                     extension_codec,
                 )?;
                 let left_schema = left.schema();
-                let on: Vec<(PhysicalExprRef)> = hashjoin
+                let on: Vec<PhysicalExprRef> = hashjoin
                     .on
                     .iter()
                     .map(|col| {

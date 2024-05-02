@@ -312,7 +312,7 @@ impl HashBuildExec {
         partition_mode: PartitionMode,
         null_equals_null: bool,
     ) -> Result<Self> {
-        let schema = input.schema();
+        let _schema = input.schema();
         if on.is_empty() {
             return plan_err!("On constraints in HashBuildExec should be non-empty");
         }
@@ -336,7 +336,7 @@ impl HashBuildExec {
         })
     }
 
-    pub fn get(result: &HashBuildResult) -> Arc<dyn ExecutionPlan> {
+    pub fn get(_result: &HashBuildResult) -> Arc<dyn ExecutionPlan> {
         todo!()
     }
 
@@ -414,9 +414,7 @@ impl HashBuildExec {
         )
     }
 
-    fn compute_properties(
-        input: &Arc<dyn ExecutionPlan>,
-    ) -> PlanProperties {
+    fn compute_properties(input: &Arc<dyn ExecutionPlan>) -> PlanProperties {
         PlanProperties::new(
             input.equivalence_properties().clone(), // Equivalence Properties
             input.output_partitioning().clone(),    // Output Partitioning
@@ -426,7 +424,7 @@ impl HashBuildExec {
 }
 
 impl DisplayAs for HashBuildExec {
-    fn fmt_as(&self, t: DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt_as(&self, _t: DisplayFormatType, _f: &mut fmt::Formatter) -> fmt::Result {
         todo!()
     }
 }
@@ -503,11 +501,11 @@ impl ExecutionPlan for HashBuildExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        let on_left = self.on.iter().map(|on| on.clone()).collect::<Vec<_>>();
-        let left_partitions = self.input.output_partitioning().partition_count();
+        let on_left = self.on.to_vec();
+        let _left_partitions = self.input.output_partitioning().partition_count();
 
         let join_metrics = BuildProbeJoinMetrics::new(partition, &self.metrics);
-        let left_fut = match self.mode {
+        let _left_fut = match self.mode {
             PartitionMode::CollectLeft => self.left_fut.once(|| {
                 let reservation =
                     MemoryConsumer::new("HashJoinInput").register(context.memory_pool());
@@ -544,9 +542,9 @@ impl ExecutionPlan for HashBuildExec {
             }
         };
 
-        let batch_size = context.session_config().batch_size();
+        let _batch_size = context.session_config().batch_size();
 
-        let reservation = MemoryConsumer::new(format!("HashJoinStream[{partition}]"))
+        let _reservation = MemoryConsumer::new(format!("HashJoinStream[{partition}]"))
             .register(context.memory_pool());
 
         // update column indices to reflect the projection

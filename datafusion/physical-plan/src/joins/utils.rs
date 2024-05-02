@@ -55,7 +55,6 @@ use futures::future::{BoxFuture, Shared};
 use futures::{ready, FutureExt};
 use hashbrown::raw::RawTable;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 /// Maps a `u64` hash value based on the build side ["on" values] to a list of indices with this key's value.
 ///

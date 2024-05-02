@@ -28,22 +28,19 @@ use super::{
 };
 use crate::ExecutionPlanProperties;
 use crate::{
-    coalesce_partitions::CoalescePartitionsExec,
     common::can_project,
-    execution_mode_from_children, handle_state,
+    handle_state,
     hash_utils::create_hashes,
     joins::utils::{
-        adjust_indices_by_join_type, adjust_right_output_partitioning,
-        apply_join_filter_to_indices, build_batch_from_indices, build_join_schema,
-        check_join_is_valid, estimate_join_statistics, get_final_indices_from_bit_map,
-        need_produce_result_in_final, partitioned_join_output_partitioning,
-        BuildProbeJoinMetrics, ColumnIndex, JoinFilter, JoinHashMap, JoinHashMapOffset,
-        JoinHashMapType, JoinOn, JoinOnRef, StatefulStreamResult,
+        adjust_indices_by_join_type, apply_join_filter_to_indices,
+        build_batch_from_indices, build_join_schema, get_final_indices_from_bit_map,
+        need_produce_result_in_final, BuildProbeJoinMetrics, ColumnIndex, JoinFilter,
+        JoinHashMap, JoinHashMapOffset, JoinHashMapType, JoinOn, JoinOnRef,
+        StatefulStreamResult,
     },
     metrics::{ExecutionPlanMetricsSet, MetricsSet},
-    DisplayAs, DisplayFormatType, Distribution, ExecutionMode, ExecutionPlan,
-    Partitioning, PlanProperties, RecordBatchStream, SendableRecordBatchStream,
-    Statistics,
+    DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, Partitioning,
+    PlanProperties, RecordBatchStream, SendableRecordBatchStream, Statistics,
 };
 
 use arrow::array::{
@@ -51,27 +48,23 @@ use arrow::array::{
     UInt64Array,
 };
 use arrow::compute::kernels::cmp::{eq, not_distinct};
-use arrow::compute::{and, concat_batches, take, FilterBuilder};
+use arrow::compute::{and, take, FilterBuilder};
 use arrow::datatypes::{Schema, SchemaRef};
 use arrow::record_batch::RecordBatch;
 use arrow::util::bit_util;
 use arrow_array::cast::downcast_array;
 use arrow_schema::ArrowError;
 use datafusion_common::{
-    internal_datafusion_err, internal_err, plan_err, project_schema, DataFusionError,
-    JoinSide, JoinType, Result,
+    internal_datafusion_err, internal_err, plan_err, DataFusionError, JoinSide, JoinType,
+    Result,
 };
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
 use datafusion_execution::TaskContext;
-use datafusion_physical_expr::equivalence::{
-    join_equivalence_properties, ProjectionMapping,
-};
-use datafusion_physical_expr::expressions::UnKnownColumn;
+
 use datafusion_physical_expr::{PhysicalExpr, PhysicalExprRef};
 
 use ahash::RandomState;
 use futures::{ready, Stream, StreamExt, TryStreamExt};
-use serde::{Deserialize, Serialize};
 
 /// HashTable and input data for the left (build side) of a join
 #[derive(Debug, Clone)]
@@ -459,12 +452,12 @@ impl HashProbeExec {
 
     /// This function creates the cache object that stores the plan properties such as schema, equivalence properties, ordering, partitioning, etc.
     fn compute_properties(
-        right: &Arc<dyn ExecutionPlan>,
-        schema: SchemaRef,
-        join_type: JoinType,
-        on: JoinOnRef,
-        mode: PartitionMode,
-        projection: Option<&Vec<usize>>,
+        _right: &Arc<dyn ExecutionPlan>,
+        _schema: SchemaRef,
+        _join_type: JoinType,
+        _on: JoinOnRef,
+        _mode: PartitionMode,
+        _projection: Option<&Vec<usize>>,
     ) -> Result<PlanProperties> {
         todo!();
         // Calculate equivalence properties:
@@ -623,7 +616,7 @@ impl ExecutionPlan for HashProbeExec {
     }
 
     fn properties(&self) -> &PlanProperties {
-        &self.cache.as_ref().unwrap()
+        self.cache.as_ref().unwrap()
     }
 
     fn required_input_distribution(&self) -> Vec<Distribution> {
@@ -740,7 +733,7 @@ impl ExecutionPlan for HashProbeExec {
         if need_produce_result_in_final(self.join_type) {
             // TODO: Replace `ceil` wrapper with stable `div_cell` after
             // https://github.com/rust-lang/rust/issues/88581
-            let visited_bitmap_size =
+            let _visited_bitmap_size =
                 bit_util::ceil(self.join_data.as_ref().unwrap().num_rows(), 8);
             // self.reservation.try_grow(visited_bitmap_size)?;
             // self.join_metrics.build_mem_used.add(visited_bitmap_size);
