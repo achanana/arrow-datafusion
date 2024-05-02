@@ -1592,10 +1592,10 @@ impl AsExecutionPlan for PhysicalPlanNode {
                 .on()
                 .iter()
                 .map(|tuple| {
-                    // let l = serialize_physical_expr(tuple.0.to_owned(), extension_codec)?;
+                    let l = serialize_physical_expr(tuple.to_owned(), extension_codec)?;
                     // let r = serialize_physical_expr(tuple.1.to_owned(), extension_codec)?;
                     Ok::<_, DataFusionError>(protobuf::JoinOn {
-                        left: None,
+                        left: Some(l),
                         right: None,
                     })
                 })

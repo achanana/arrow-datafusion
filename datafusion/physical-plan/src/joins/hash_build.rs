@@ -293,6 +293,8 @@ pub struct HashBuildExec {
     /// Otherwise, rows that have `null`s in the join columns will not be
     /// matched and thus will not appear in the output.
     pub null_equals_null: bool,
+    /// Cache holding plan properties like equivalences, output partitioning etc.
+    cache: PlanProperties,
 }
 
 impl HashBuildExec {
@@ -317,6 +319,8 @@ impl HashBuildExec {
 
         let random_state = RandomState::with_seeds(0, 0, 0, 0);
 
+        let cache = Self::compute_properties(&input);
+
         Ok(HashBuildExec {
             input,
             on,
@@ -328,6 +332,7 @@ impl HashBuildExec {
             metrics: ExecutionPlanMetricsSet::new(),
             projection,
             null_equals_null,
+            cache,
         })
     }
 
@@ -408,6 +413,16 @@ impl HashBuildExec {
             self.null_equals_null,
         )
     }
+
+    fn compute_properties(
+        input: &Arc<dyn ExecutionPlan>,
+    ) -> PlanProperties {
+        PlanProperties::new(
+            input.equivalence_properties().clone(), // Equivalence Properties
+            input.output_partitioning().clone(),    // Output Partitioning
+            input.execution_mode(),                 // Execution Mode
+        )
+    }
 }
 
 impl DisplayAs for HashBuildExec {
@@ -441,7 +456,7 @@ impl ExecutionPlan for HashBuildExec {
     }
 
     fn properties(&self) -> &PlanProperties {
-        todo!()
+        &self.cache
     }
 
     // For [JoinType::Inner] and [JoinType::RightSemi] in hash joins, the probe phase initiates by

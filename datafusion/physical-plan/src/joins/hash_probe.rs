@@ -314,6 +314,10 @@ pub struct HashProbeExec {
 }
 
 impl HashProbeExec {
+    pub fn set_join_data(&mut self, data: JoinLeftData) {
+        self.join_data = Some(data);
+    }
+
     /// Tries to create a new [HashProbeExec].
     ///
     /// # Error
